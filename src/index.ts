@@ -12,6 +12,7 @@ import { redisClient } from "./config/redis";
 
 const app = express();
 dotenv.config();
+
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
