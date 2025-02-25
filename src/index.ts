@@ -8,6 +8,7 @@ import mongoose from "mongoose";
 import Todo,{ITodo} from "./models/todo";
 import TodoRoutes from "./routes";
 import connectMongoDB from "./db";
+import { redisClient } from "./config/redis";
 
 const app = express();
 dotenv.config();
@@ -18,12 +19,11 @@ const io = new Server(httpServer, {
   },
 });
 
-export const redisClient = createClient({
-  url: "redis://localhost:6379",
-});
-export const REDIS_KEY = "FULLSTACK_TASK_PRANJAL";
+// export const redisClient = createClient({
+//   url: "redis://localhost:6379",
+// });
+// export const process.env.REDIS_KEY as string = "FULLSTACK_TASK_PRANJAL";
 
-// MongooseConnect()
 const PORT = process.env.PORT || 8080;
 
 app.use(express.json());
@@ -34,26 +34,18 @@ io.on("connection", async (socket: Socket) => {
 
   socket.on("add", async (task: string) => {
     try {
-      // Ensure task is a string
-      // if (typeof task !== "string") {
-      //   throw new Error("Task must be a string");
-      // }
 
-      // Get current tasks from Redis
-      const cachedTasks = await redisClient.get(REDIS_KEY);
+      const cachedTasks = await redisClient.get(process.env.REDIS_KEY as string);
       let tasks: string[] = cachedTasks ? JSON.parse(cachedTasks) : [];
 
-      // Add new task (string)
       tasks.push(task);
 
-      // Check if we've exceeded 50 items
       if (tasks.length > 10) {
         console.log("Cache exceeded 50 items, moving to MongoDB...");
 
-        // Move all tasks to MongoDB
         const tasksToSave = tasks.map(t => ({
           
-          task: t, // t is already a string
+          task: t, 
           createdAt: new Date()
         }));
         console.log("tasks",tasks)
@@ -64,27 +56,23 @@ io.on("connection", async (socket: Socket) => {
             throw new Error(`MongoDB insert failed: ${err.message}`);
           });
 
-        // Flush the Redis cache
         tasks = [];
-        await redisClient.set(REDIS_KEY, JSON.stringify(tasks))
+        await redisClient.set(process.env.REDIS_KEY as string, JSON.stringify(tasks))
           .then(() => console.log("Redis cache flushed"))
           .catch(err => {
             throw new Error(`Redis flush failed: ${err.message}`);
           });
 
-        // Get all tasks from MongoDB to send to clients
         const mongoTasks = await Todo.find().lean();
         const allTasks = mongoTasks.map((t: ITodo) => t.task);
         io.emit("taskListUpdate", allTasks);
       } else {
-        // If under 50 items, just update Redis
-        await redisClient.set(REDIS_KEY, JSON.stringify(tasks))
+        await redisClient.set(process.env.REDIS_KEY as string, JSON.stringify(tasks))
           .then(() => console.log("Task added to Redis"))
           .catch(err => {
             throw new Error(`Redis update failed: ${err.message}`);
           });
 
-        // Broadcast updated list from Redis
         io.emit("taskListUpdate", tasks);
       }
     } catch (error) {
@@ -96,15 +84,14 @@ io.on("connection", async (socket: Socket) => {
   socket.on("update", async (data: { taskIndex: number; newTask: string }) => {
     try {
       const { taskIndex, newTask } = data;
-      const cachedTasks = await redisClient.get(REDIS_KEY);
+      const cachedTasks = await redisClient.get(process.env.REDIS_KEY as string);
       const tasks = cachedTasks ? JSON.parse(cachedTasks) : [];
-      // console.log("Tasks when update", tasks);
 
       if (tasks.length > 0) {
         if (taskIndex >= 0 && taskIndex < tasks.length) {
           tasks[taskIndex] = newTask;
           console.log(tasks);
-          await redisClient.set(REDIS_KEY, JSON.stringify(tasks));
+          await redisClient.set(process.env.REDIS_KEY as string, JSON.stringify(tasks));
           io.emit("taskListUpdate", tasks);
         } else {
           throw new Error("Invalid task index for Redis update");
@@ -116,11 +103,9 @@ io.on("connection", async (socket: Socket) => {
           const taskToUpdate = mongoTasks[taskIndex];
           await Todo.updateOne({ _id: taskToUpdate._id }, { task: newTask });
 
-          // Get updated list from MongoDB
           const updatedTasks = await Todo.find().lean();
           const taskList = updatedTasks.map((t: ITodo) => t.task);
 
-          // Broadcast updated list to all clients
           io.emit("taskListUpdate", taskList);
         } else {
           throw new Error("Invalid task index for MongoDB update");
@@ -142,9 +127,6 @@ io.on("connection", async (socket: Socket) => {
 
   app.use("/", TodoRoutes);
 
-  // app.listen(PORT, async () => {
-  //   console.log(`Server is running on PORT http://localhost:${PORT}`);
-  // });
 
   connectMongoDB();
   async function startServer() {
