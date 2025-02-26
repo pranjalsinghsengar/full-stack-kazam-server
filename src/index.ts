@@ -41,7 +41,7 @@ io.on("connection", async (socket: Socket) => {
 
       tasks.push(task);
 
-      if (tasks.length > 10) {
+      if (tasks.length >= 50) {
         console.log("Cache exceeded 50 items, moving to MongoDB...");
 
         const tasksToSave = tasks.map(t => ({
